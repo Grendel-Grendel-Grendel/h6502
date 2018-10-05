@@ -9,11 +9,13 @@ module CPU.Util (
   , splitW16
   , sliceBS
   , catMaybesV
+  , bitGet
 ) where
 
 --Code adapted from HNES
 
-import           Data.Bits       (shiftL, shiftR, (.&.), (.|.))
+import           CPU.Types
+import           Data.Bits       (bit, shiftL, shiftR, (.&.), (.|.))
 import qualified Data.ByteString as BS
 import           Data.Maybe      (fromJust, isJust)
 import           Data.Vector     as V
@@ -50,4 +52,5 @@ sliceBS from to xs = BS.take (to - from) (BS.drop from xs)
 catMaybesV :: Vector (Maybe a) -> Vector a
 catMaybesV = V.map fromJust . V.filter isJust
 
-
+bitGet :: Byte -> Byte -> Word8
+bitGet x b = (x .&. bit (fromIntegral b)) `shiftR` (fromIntegral b)
