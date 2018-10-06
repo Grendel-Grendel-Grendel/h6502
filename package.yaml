@@ -24,6 +24,7 @@ dependencies:
 - vector
 - bytestring
 - ilist
+- mtl
 library:
   source-dirs: src
 

@@ -65,4 +65,4 @@ flagsToByte s@CPU {c = c0
                                            ,shiftL v6 6
                                            ,shiftL n7 7] in
                                foldr (.|.) 0 bitList
-                                 
+          

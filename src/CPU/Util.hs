@@ -15,7 +15,7 @@ module CPU.Util (
 --Code adapted from HNES
 
 import           CPU.Types
-import           Data.Bits       (bit, shiftL, shiftR, (.&.), (.|.))
+import           Data.Bits       (bit, testBit, shiftL, shiftR, (.&.), (.|.))
 import qualified Data.ByteString as BS
 import           Data.Maybe      (fromJust, isJust)
 import           Data.Vector     as V
@@ -53,4 +53,15 @@ catMaybesV :: Vector (Maybe a) -> Vector a
 catMaybesV = V.map fromJust . V.filter isJust
 
 bitGet :: Byte -> Byte -> Word8
-bitGet x b = (x .&. bit (fromIntegral b)) `shiftR` (fromIntegral b)
+bitGet x b =
+    case x of
+      0 -> fromIntegral $ fromEnum $ testBit  b 0
+      1 -> fromIntegral $ fromEnum $ testBit  b 1
+      2 -> fromIntegral $ fromEnum $ testBit  b 2
+      3 -> fromIntegral $ fromEnum $ testBit  b 3
+      4 -> fromIntegral $ fromEnum $ testBit  b 4
+      5 -> fromIntegral $ fromEnum $ testBit  b 5
+      6 -> fromIntegral $ fromEnum $ testBit  b 6
+      7 -> fromIntegral $ fromEnum $ testBit  b 7
+
+
