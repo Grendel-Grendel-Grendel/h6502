@@ -63,5 +63,5 @@ bitGet x b =
       5 -> fromIntegral $ fromEnum $ testBit  b 5
       6 -> fromIntegral $ fromEnum $ testBit  b 6
       7 -> fromIntegral $ fromEnum $ testBit  b 7
-
+      _ -> 0
 

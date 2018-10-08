@@ -18,9 +18,11 @@ import CPU.Opcode
 getRom :: FilePath -> IO [Word8]
 getRom fp = B.readFile fp >>= (return . B.unpack)
 
-loadMemory :: CPU -> [Word8] -> Int -> CPU
-loadMemory s@CPU{memory = mem} rom i =
-  s { memory = mem V.// (alignIndex rom)}
+loadMemory :: [Word8] -> Int -> State CPU ()
+loadMemory rom i = do
+  s@CPU{memory = mem} <- get
+  put s { memory = mem V.// (alignIndex rom)}
+  return ()
   where
     alignIndex  = increaseFst . indexed
     increaseFst = fmap (\(x,y) -> (x+i,y))
@@ -29,8 +31,8 @@ loadMemory s@CPU{memory = mem} rom i =
 
 brk :: State CPU ()
 brk = do s <- get
-         val <- readCPUmemory16 0xFFFE  
-         put $ s { pc = val, b = 1}
+         php
+         pushAddr (pc s)  
          return () 
 
 adc :: Address -> State CPU ()
@@ -66,14 +68,20 @@ asl mode addr = do
               ,v = (if bit7' == 1 then 1 else vv)}
       return ()
         
-bcc :: CPU -> Address -> CPU
-bcc s@CPU{c = cv} addr = branch s (not $ toBool cv) addr
+bcc ::  Address -> State CPU ()
+bcc addr = do
+  s@CPU{c = cv} <- get
+  branch (not $ toBool cv) addr
 
-bcs :: CPU -> Address -> CPU
-bcs s@CPU{c = cv} addr = branch s (toBool cv) addr
+bcs :: Address -> State CPU ()
+bcs addr = do
+  s@CPU{c = cv} <- get
+  branch (toBool cv) addr
 
-beq :: CPU -> Address -> CPU
-beq s@CPU{z = zv} addr = branch s (toBool zv) addr
+beq :: Address -> State CPU ()
+beq addr = do
+  s@CPU{z = zv} <- get
+  branch (toBool zv) addr
 
 bit :: Address -> State CPU ()
 bit addr = do
@@ -87,33 +95,51 @@ bit addr = do
     else do put $ s {z = 0, n = bit7, v = bit6}
             return ()
 
-bmi :: CPU -> Address -> CPU
-bmi s@CPU{n = nv} addr = branch s (toBool nv) addr
+bmi :: Address -> State CPU ()
+bmi addr = do
+  s@CPU{n = nv} <- get
+  branch (toBool nv) addr
 
-bne :: CPU -> Address -> CPU
-bne s@CPU{z = zv} addr = branch s (not $ toBool zv) addr
+bne :: Address -> State CPU ()
+bne addr = do
+  s@CPU{z = zv} <- get 
+  branch (not $ toBool zv) addr
 
-bpl :: CPU -> Address -> CPU
-bpl s@CPU{n = nv} addr = branch s (not $ toBool nv) addr
+bpl :: Address -> State CPU ()
+bpl addr = do
+  s@CPU{n = nv} <- get
+  branch (not $ toBool nv) addr
 
-bvc :: CPU -> Address -> CPU
-bvc s@CPU{v = vv} addr = branch s (not $ toBool vv) addr
+bvc :: Address -> State CPU ()
+bvc addr = do
+  s@CPU{v = vv} <- get
+  branch (not $ toBool vv) addr
 
-bvs :: CPU -> Address -> CPU
-bvs s@CPU{v = vv} addr = branch s (toBool vv) addr
+bvs :: Address -> State CPU ()
+bvs addr = do
+  s@CPU{v = vv} <- get
+  branch (toBool vv) addr
 
-clc :: CPU -> CPU
-clc s = s {c = 0}
-
-cld :: CPU -> CPU
-cld s = s {d = 0}
-
-cli :: CPU -> CPU
-cli s = s {i = 0}
-
-clv :: CPU -> CPU
-clv s = s {v = 0}
-
+clc :: State CPU ()
+clc = do s <- get
+         put s {c = 0}
+         return ()
+           
+cld :: State CPU ()
+cld = do s <- get
+         put s {d = 0}
+         return ()
+           
+cli :: State CPU ()
+cli = do s <- get
+         put s {i = 0}
+         return ()
+           
+clv :: State CPU ()
+clv = do s <- get
+         put s {v = 0}
+         return ()
+           
 cmp :: Address -> State CPU ()
 cmp addr = do s@CPU{acc = av} <- get
               val <- readCPUmemory8 addr
@@ -133,16 +159,17 @@ cpy addr = do
 dec :: Address -> State CPU ()
 dec addr = do
   s <- get
-  byte <-  readCPUmemory8 addr
-  let (a,s') = runState (decrement byte) s 
+  val <-  readCPUmemory8 addr
+  let (a,s') = runState (decrement val) s 
   put s' {memory = writeByte (memory s) addr a}
   return ()               
 
 dex :: State CPU ()
-dex = do s <- get
-         let (a, s') = runState (decrement (x s)) s
-         put $ s' {x = a}
-         return ()
+dex = do
+  s <- get
+  let (a, s') = runState (decrement (x s)) s
+  put $ s' {x = a}
+  return ()
 
 dey :: State CPU ()
 dey = do s <- get
@@ -163,7 +190,8 @@ eor addr = do
 inc :: Address -> State CPU ()
 inc addr = do s <- get
               val <- readCPUmemory8 addr
-              put $ s {memory = (writeByte (memory s) addr val)} 
+              let (a,s') = runState (augment val) s
+              put $ s' {memory = (writeByte (memory s) addr a)} 
               return ()
 
 inx :: State CPU ()
@@ -180,7 +208,7 @@ iny = do s <- get
 
 jsr :: Address -> State CPU ()
 jsr addr = do CPU{pc = pcv} <- get 
-              pushAddr pcv
+              pushAddr (pcv - 1)
               jmp addr
               
 
@@ -232,12 +260,12 @@ lsr mode addr = do
 nop :: State CPU ()
 nop = return ()
 
-ora :: CPU -> Address -> State CPU ()
-ora s@CPU{acc = a} addr = do
-  s <- get
+ora :: Address -> State CPU ()
+ora addr = do
+  s@CPU{acc = a} <- get
   val <- readCPUmemory8 addr
-  let (a, s') = runState (arithmetic (a.|.) (x s)) s
-  put $ s' {acc = a}
+  let (a', s') = runState (arithmetic (a.|.) (x s)) s
+  put $ s' {acc = a'}
   return ()
 
 pha :: State CPU ()
@@ -250,13 +278,28 @@ php = do s@CPU{acc = a} <- get
          push (flagsToByte s)
 
 pla :: State CPU ()
-pla = pop 
+pla = do
+  s <- get 
+  let s' = execState (pop) s
+  put s'
+  
+  return ()
 
 sec :: State CPU ()
 sec = do
   s <- get
   put $ s {c = 1}
   return ()
+
+slo :: Address -> State CPU ()
+slo addr = do
+  s <- get
+  let (a,s') = runState (readCPUmemory8 addr) s
+      r = (shiftL a 1) .|. (acc s')
+  put s' {acc = r}
+  asl Immediate addr
+  return ()
+  
 
 plp :: State CPU ()
 plp = byteToFlags
@@ -272,12 +315,14 @@ rol mode addr = do
                               ,c = bit7
                               ,v = (if bit7' == 1 then 1 else vv)}
                       return ()
-    _           -> do
-      val <- readCPUmemory8 addr
-      put $ s {memory = writeByte (memory s) addr val
-              ,c = bit7
-              ,v = (if bit7' == 1 then 1 else vv)}
-      return ()
+    _           -> do val <- readCPUmemory8 addr
+                      let val7  = bitGet 8 val
+                          val'  = val `rotateL` 1
+                          val7' = bitGet 8 val'
+                      put $ s {memory = writeByte (memory s) addr val'
+                              ,c = val7
+                              ,v = (if val7' == 1 then 1 else vv)}
+                      return ()
 
 ror :: AddressMode -> Address -> State CPU ()
 ror mode addr = do
@@ -297,16 +342,20 @@ ror mode addr = do
               ,v = (if bit7' == 1 then 1 else vv)}
       return ()
 
+rra :: Address -> State CPU ()
+rra addr = do
+  ror (Accumulator) addr
+  adc addr
+
 rti :: State CPU ()
-rti = do
-  s@CPU{sp = spv} <- get
+rti = do  
+  rts
   plp
-  rts 
 
 rts :: State CPU ()
 rts = do
   s@CPU{sp = spv, memory = mem} <- get
-  let val = evalState (readCPUmemory16 (toWord16 spv)) s
+  let val = evalState (readCPUmemory16 (toWord16 (spv - 2))) s
   put s {memory = writeAddr mem (toWord16 spv) 0}
   jmp val
 
@@ -424,27 +473,34 @@ pop = do
 pushAddr :: Address -> State CPU ()
 pushAddr addr = do s@CPU{memory = mem, sp = spv} <- get
                    put s {memory = writeAddr mem ((toWord16 spv) + 0x0100) addr
-                         ,sp = spv +1}
+                         ,sp = spv +2}
                    return ()
 
-branch :: CPU -> Bool -> Address -> CPU
-branch s@CPU{cyclesC = cycles'} cond addr =
+branch :: Bool -> Address -> State CPU ()
+branch cond addr = do
+  s@CPU{cyclesC = cycles',pc = pcv} <- get
+  val <- (readCPUmemory8 addr)
   let cycles'' = if differentPages (pc s) addr then 2 else 1
-  in if cond
-     then s {pc = addr, cyclesC = cycles'' + cycles'}
-     else s 
+  if cond
+    then do put s {pc = (fromIntegral val) + pcv , cyclesC = cycles'' + cycles'}
+            return ()
+    else do
+    put s{cyclesC = cycles' + 2,pc = pcv + 2}
+    return () 
 
 compare' :: Byte -> Byte -> State CPU ()
 compare' v1 v2 = do
-  s@CPU{acc = av} <- get
-  if v1 == v2
-    then do put $ s {c = 1, z = 1}
+  s <- get
+  if v1 > v2
+    then do put s {c = 1}
             return ()
     else
-    if v1 > v2
-    then do put $ s {c = 1}
+    if v1 == v2
+    then do put s {c = 1, z = 1}
             return ()
-    else return () 
+    else do
+      put s {n = 1}
+      return ()
 
 arithmetic :: (Byte -> Byte) -> Word8 -> State CPU Byte --memory arithmetic
 arithmetic f val = do
@@ -453,7 +509,7 @@ arithmetic f val = do
   if val' == 0
     then do put $ s {z = 1}
             return val'
-    else if bitGet 7 val == 1
+    else if bitGet 7 val' == 1
          then do put $ s {n = 1}
                  return val'
          else return val'
@@ -462,7 +518,8 @@ augment :: Word8 -> State CPU Word8
 augment val = arithmetic (+1) val
 
 decrement :: Word8 -> State CPU Byte 
-decrement val = arithmetic ((-)1) val 
+decrement val = do
+  arithmetic (val-) 1 --subtraction isn't associative dingus
   
 writeByte :: Memory -> Address -> Byte -> Memory
 writeByte mem addr val = V.modify (\vec -> MV.write vec (fromIntegral addr) val) mem
@@ -528,4 +585,124 @@ addressForMode s@CPU {memory = mem, pc = pcv, x = xr, y = yr} mode =
   where immAddr = evalState (readCPUmemory16 (pcv+1)) s
         immByte = evalState (readCPUmemory8  (pcv+1)) s
 
-step :: State CPU ()
+step :: State CPU (Opcode,Address,Byte)
+step = do
+  s@CPU{memory = mem, pc = pcv} <- get
+  byte <- readCPUmemory8 pcv
+  let opcode@Opcode {CPU.Opcode.cycle = cycles,len = length, pageCrossCycles = extraCycles,mnem = mnemonic} = decodeOpcode byte
+      op = runInstruction opcode
+      (diff,address) = addressForMode s (mode opcode)
+  byte' <- readCPUmemory8 (pcv + 1)
+  let increasePc =
+        if diff --done if not a jump or branch
+        then do let s' = execState (op address) s
+                put s' {cyclesC = (fromIntegral $ cyclesC s')
+                                  + (fromIntegral cycles)
+                                  + (fromIntegral extraCycles),
+                         pc = (fromIntegral $ pc s') + (fromIntegral length)}
+                return (opcode,address,byte')
+        else do let s' = execState (op address) s
+                put s' {cyclesC = fromIntegral (fromIntegral $ cyclesC s')
+                                  + (fromIntegral cycles),
+                         pc = (fromIntegral $ pc s')
+                              + (fromIntegral length)}
+                return (opcode,address,byte')
+      samePc =
+        if diff --done if not a jump or branch
+        then do let s' = execState (op address) s
+                put s' {cyclesC = (fromIntegral $ cyclesC s')
+                                  + (fromIntegral cycles)
+                                  + (fromIntegral extraCycles),
+                         pc = (fromIntegral $ pc s')
+                              + (fromIntegral length)}
+                return (opcode,address,byte')
+        else do let s' = execState (op address) s
+                put s' {cyclesC = (cyclesC s')
+                                  + (fromIntegral cycles)}
+                return (opcode,address,byte') 
+  case mnemonic of
+    BNE -> samePc 
+    BEQ -> samePc
+    BMI -> samePc
+    BPL -> samePc
+    BRK -> samePc
+    BVC -> samePc
+    BVS -> samePc
+    JMP -> samePc
+    JSR -> samePc
+    RTS -> samePc
+    _   -> increasePc
+     
+
+runInstruction :: Opcode -> (Address -> State CPU ())
+runInstruction (Opcode _ mnemonic mode _ _ _) = case mnemonic of
+  ADC -> adc
+  AND -> CPU.and
+  ASL -> asl mode
+  BCC -> bcc
+  BCS -> bcs
+  BEQ -> beq
+  BIT -> CPU.bit
+  BMI -> bmi
+  BNE -> bne
+  BPL -> bpl
+  BRK -> const brk
+  BVC -> bvc
+  BVS -> bvs
+  CLC -> const clc
+  CLD -> const cld
+  CLI -> const cli
+  CLV -> const clv
+  CMP -> cmp
+  CPX -> cpx
+  CPY -> cpy
+  DEC -> dec
+  DEX -> const dex
+  DEY -> const dey
+  EOR -> eor
+  INC -> inc
+  INX -> const inx
+  INY -> const iny
+  JMP -> jmp
+  JSR -> jsr
+  LDA -> lda
+  LDX -> ldx
+  LDY -> ldy
+  LSR -> lsr mode
+  NOP -> const nop
+  PHA -> const pha
+  PHP -> const php
+  PLA -> const pla
+  PLP -> const plp
+  ORA -> ora
+  RTI -> const rti
+  RTS -> const rts
+  ROR -> ror mode
+  ROL -> rol mode
+  RRA -> rra
+  SBC -> sbc
+  SEC -> const sec
+  SED -> const sed
+  SEI -> const sei
+  SLO -> slo
+  STA -> sta
+  STX -> stx
+  STY -> sty
+  TAX -> const tax
+  TAY -> const tay
+  TSX -> const tsx
+  TXA -> const txa
+  TXS -> const txs
+  TYA -> const tya
+  _   -> const nop
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  

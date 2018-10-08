@@ -25,6 +25,8 @@ dependencies:
 - bytestring
 - ilist
 - mtl
+- stm
+
 library:
   source-dirs: src
 

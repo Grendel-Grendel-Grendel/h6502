@@ -25,12 +25,12 @@ data CPU = CPU {
 
 initCPU =
   CPU {
-    memory = V.replicate (10 * 1) 0x00
+    memory = V.replicate (1024 * 68) 0x00
   , acc     = 0
   , x       = 0
   , y       = 0
   , sp      = 0
-  , pc      = 0
+  , pc      = 0x400
   , c       = 0
   , z       = 0
   , i       = 0
