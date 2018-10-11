@@ -6,13 +6,12 @@ import Control.Monad.State
 import qualified Data.ByteString as B
 import Data.Bits
 import CPU.Types
-import CPU.Util
+import CPU.Util --toChar comes from here as stack didnt like ascii lib
 import Data.Word
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as MV
 import Data.List.Index (indexed)
 import CPU.Opcode
-
 
 --initial rom loading
 getRom :: FilePath -> IO [Word8]
@@ -29,28 +28,28 @@ loadMemory rom i = do
 
 --opcodes
 
-brk :: State CPU ()
+brk :: State CPU IOevent
 brk = do s <- get
          php
          pushAddr (pc s)  
-         return () 
+         return Nothing 
 
-adc :: Address -> State CPU ()
+adc :: Address -> State CPU IOevent
 adc addr = do
   s@CPU{acc = a} <- get 
   val <- readCPUmemory8 addr
   let (a',s') = runState (arithmetic (+a) val) s
   put $ s' {acc = a', c = if bitGet 7 a /= bitGet 7 a' then 1 else c s'  }
-  return ()  
+  return Nothing  
 
-and :: Address -> State CPU ()
+and :: Address -> State CPU IOevent
 and addr = do
   s@CPU{acc = av} <- get
   val <- readCPUmemory8 addr
   put $ s {acc = av .&. val}
-  return ()
+  return Nothing
 
-asl :: AddressMode -> Address -> State CPU ()
+asl :: AddressMode -> Address -> State CPU IOevent
 asl mode addr = do
   s@CPU{acc = av, v = vv} <- get
   let bit7 = bitGet 8 av 
@@ -60,30 +59,29 @@ asl mode addr = do
     Accumulator -> do put $ s {acc = acc'
                               ,c = bit7
                               ,v = (if bit7' == 1 then 1 else vv)}
-                      return ()
+                      return Nothing
     _           -> do
       val <- readCPUmemory8 addr
-      put $ s {memory = writeByte (memory s) addr val
-              ,c = bit7
+      put $ s {c = bit7
               ,v = (if bit7' == 1 then 1 else vv)}
-      return ()
+      writeByte addr val
         
-bcc ::  Address -> State CPU ()
+bcc ::  Address -> State CPU IOevent
 bcc addr = do
   s@CPU{c = cv} <- get
   branch (not $ toBool cv) addr
 
-bcs :: Address -> State CPU ()
+bcs :: Address -> State CPU IOevent
 bcs addr = do
   s@CPU{c = cv} <- get
   branch (toBool cv) addr
 
-beq :: Address -> State CPU ()
+beq :: Address -> State CPU IOevent
 beq addr = do
   s@CPU{z = zv} <- get
   branch (toBool zv) addr
 
-bit :: Address -> State CPU ()
+bit :: Address -> State CPU IOevent
 bit addr = do
   s@CPU{acc = av} <- get
   val <- readCPUmemory8 addr
@@ -91,93 +89,92 @@ bit addr = do
       bit6 = bitGet 7 av
   if 0 == (av .&. val)
     then do put $ s {z = 1, n = bit7, v = bit6}
-            return ()
+            return Nothing
     else do put $ s {z = 0, n = bit7, v = bit6}
-            return ()
+            return Nothing
 
-bmi :: Address -> State CPU ()
+bmi :: Address -> State CPU IOevent
 bmi addr = do
   s@CPU{n = nv} <- get
   branch (toBool nv) addr
 
-bne :: Address -> State CPU ()
+bne :: Address -> State CPU IOevent
 bne addr = do
   s@CPU{z = zv} <- get 
   branch (not $ toBool zv) addr
 
-bpl :: Address -> State CPU ()
+bpl :: Address -> State CPU IOevent
 bpl addr = do
   s@CPU{n = nv} <- get
   branch (not $ toBool nv) addr
 
-bvc :: Address -> State CPU ()
+bvc :: Address -> State CPU IOevent
 bvc addr = do
   s@CPU{v = vv} <- get
   branch (not $ toBool vv) addr
 
-bvs :: Address -> State CPU ()
+bvs :: Address -> State CPU IOevent
 bvs addr = do
   s@CPU{v = vv} <- get
   branch (toBool vv) addr
 
-clc :: State CPU ()
+clc :: State CPU IOevent
 clc = do s <- get
          put s {c = 0}
-         return ()
+         return Nothing
            
-cld :: State CPU ()
+cld :: State CPU IOevent
 cld = do s <- get
          put s {d = 0}
-         return ()
+         return Nothing
            
-cli :: State CPU ()
+cli :: State CPU IOevent
 cli = do s <- get
          put s {i = 0}
-         return ()
+         return Nothing
            
-clv :: State CPU ()
+clv :: State CPU IOevent
 clv = do s <- get
          put s {v = 0}
-         return ()
+         return Nothing
            
-cmp :: Address -> State CPU ()
+cmp :: Address -> State CPU IOevent
 cmp addr = do s@CPU{acc = av} <- get
               val <- readCPUmemory8 addr
               compare' av val
 
-cpx :: Address -> State CPU ()
+cpx :: Address -> State CPU IOevent
 cpx addr = do s@CPU{acc = av,x = xv} <- get
               val <- readCPUmemory8 addr
               compare' xv val
 
-cpy :: Address -> State CPU ()
+cpy :: Address -> State CPU IOevent
 cpy addr = do
   s@CPU{y = yv} <- get
   val <- readCPUmemory8 addr
   compare' yv val 
 
-dec :: Address -> State CPU ()
+dec :: Address -> State CPU IOevent
 dec addr = do
   s <- get
   val <-  readCPUmemory8 addr
   let (a,s') = runState (decrement val) s 
-  put s' {memory = writeByte (memory s) addr a}
-  return ()               
+  writeByte addr a
 
-dex :: State CPU ()
+dex :: State CPU IOevent
 dex = do
   s <- get
   let (a, s') = runState (decrement (x s)) s
   put $ s' {x = a}
-  return ()
+  return Nothing
 
-dey :: State CPU ()
+dey :: State CPU IOevent
 dey = do s <- get
          let (a, s') = runState (decrement (y s)) s
          put $ s' {y = a}
-         return ()
+         return Nothing
 
-eor :: Address -> State CPU ()
+eor :: Address -> State CPU IOevent
 eor addr = do
   s@CPU{acc = a, z = zv, n = nv} <- get
   y <- readCPUmemory8 addr
@@ -185,64 +182,63 @@ eor addr = do
   put $ s {acc = val
           ,z = if val == 0 then 1 else zv
           ,n = if bitGet 8 val == 1 then 1 else nv}
-  
+  return Nothing
 
-inc :: Address -> State CPU ()
-inc addr = do s <- get
-              val <- readCPUmemory8 addr
-              let (a,s') = runState (augment val) s
-              put $ s' {memory = (writeByte (memory s) addr a)} 
-              return ()
+inc :: Address -> State CPU IOevent
+inc addr = do val <- readCPUmemory8 addr
+              augment val
+              writeByte addr (val - 1) --augment does not write the byte, having val manually decreased results in cleaner code 
+              
 
-inx :: State CPU ()
+inx :: State CPU IOevent
 inx = do s <- get
          let (a, s') = runState (augment (y s)) s
          put $ s' {y = a}
-         return ()
+         return Nothing
 
-iny :: State CPU ()
+iny :: State CPU IOevent
 iny = do s <- get
          let (a, s') = runState (augment (y s)) s
          put $ s' {y = a}
-         return ()
+         return Nothing
 
-jsr :: Address -> State CPU ()
+jsr :: Address -> State CPU IOevent
 jsr addr = do CPU{pc = pcv} <- get 
               pushAddr (pcv - 1)
               jmp addr
               
 
-jmp :: Address -> State CPU ()
+jmp :: Address -> State CPU IOevent
 jmp addr = do
   s@CPU{pc = pcv} <- get
   put $ s {pc = addr}
-  return ()
+  return Nothing
 
-lda :: Address -> State CPU ()
+lda :: Address -> State CPU IOevent
 lda addr = do
   s <- get
   val <- readCPUmemory8 addr
   let (a, s') = runState (arithmetic (\_ -> val) (acc s)) s
   put $ s' {acc = a}
-  
+  return Nothing
 
-ldx :: Address -> State CPU ()
+ldx :: Address -> State CPU IOevent
 ldx addr = do
   s <- get
   val <- readCPUmemory8 addr
   let (a, s') = runState (arithmetic (\_ -> val) (x s)) s
   put $ s' {x = a}
+  return Nothing
 
-
-ldy :: Address -> State CPU ()
+ldy :: Address -> State CPU IOevent
 ldy addr = do
   s <- get
   val <- readCPUmemory8 addr
   let (a, s') = runState (arithmetic (\_ -> val) (y s)) s
   put $ s' {y = a}
-
+  return Nothing
   
-lsr :: AddressMode -> Address -> State CPU ()
+lsr :: AddressMode -> Address -> State CPU IOevent
 lsr mode addr = do
   s@CPU{acc = av, v = vv} <- get
   let bit7 = bitGet 8 av 
@@ -253,58 +249,71 @@ lsr mode addr = do
     Accumulator -> do put s {acc = acc'
                             ,c = bit7
                             ,v = (if bit7' == 1 then 1 else vv)}
-    _           -> do put s {memory = writeByte (memory s) addr val 
-,c = bit7
-,v = (if bit7' == 1 then 1 else vv)}
+                      return Nothing
+    _           -> do put s {c = bit7
+                             ,v = (if bit7' == 1 then 1 else vv)}
+                      writeByte addr val  
 
-nop :: State CPU ()
-nop = return ()
+sre :: Address -> State CPU IOevent
+sre addr = do
+  s <- get
+  val <- readCPUmemory8 addr
+  let a  = val `shiftR` 1
+      a' = xor a (acc s)
+  lsr Immediate addr
+  s' <- get
+  let s'' = execState (arithmetic (xor a) (acc s)) s' 
+  put s''{acc = a'}
+  return Nothing
 
-ora :: Address -> State CPU ()
+nop :: State CPU IOevent
+nop = return Nothing
+
+ora :: Address -> State CPU IOevent
 ora addr = do
   s@CPU{acc = a} <- get
   val <- readCPUmemory8 addr
   let (a', s') = runState (arithmetic (a.|.) (x s)) s
   put $ s' {acc = a'}
-  return ()
+  return Nothing
 
-pha :: State CPU ()
+pha :: State CPU IOevent
 pha = do CPU{acc = a} <- get
          push a
   
 
-php :: State CPU ()
+php :: State CPU IOevent
 php = do s@CPU{acc = a} <- get
          push (flagsToByte s)
 
-pla :: State CPU ()
+pla :: State CPU IOevent
 pla = do
   s <- get 
   let s' = execState (pop) s
   put s'
   
-  return ()
+  return Nothing
 
-sec :: State CPU ()
+sec :: State CPU IOevent
 sec = do
   s <- get
   put $ s {c = 1}
-  return ()
+  return Nothing
 
-slo :: Address -> State CPU ()
+slo :: Address -> State CPU IOevent
 slo addr = do
   s <- get
   let (a,s') = runState (readCPUmemory8 addr) s
       r = (shiftL a 1) .|. (acc s')
   put s' {acc = r}
   asl Immediate addr
-  return ()
+  return Nothing
   
 
-plp :: State CPU ()
+plp :: State CPU IOevent
 plp = byteToFlags
 
-rol :: AddressMode -> Address -> State CPU ()
+rol :: AddressMode -> Address -> State CPU IOevent
 rol mode addr = do
   s@CPU{acc = av, v = vv} <- get
   let bit7 = bitGet 8 av 
@@ -314,135 +323,133 @@ rol mode addr = do
     Accumulator -> do put $ s {acc = acc'
                               ,c = bit7
                               ,v = (if bit7' == 1 then 1 else vv)}
-                      return ()
+                      return Nothing
     _           -> do val <- readCPUmemory8 addr
                       let val7  = bitGet 8 val
                           val'  = val `rotateL` 1
                           val7' = bitGet 8 val'
-                      put $ s {memory = writeByte (memory s) addr val'
-                              ,c = val7
-                              ,v = (if val7' == 1 then 1 else vv)}
-                      return ()
+                      put s{c = val7, v = (if val7' == 1 then 1 else vv)}
+                      writeByte addr val'
 
-ror :: AddressMode -> Address -> State CPU ()
+ror :: AddressMode -> Address -> State CPU IOevent
 ror mode addr = do
-  s@CPU{acc = av, v = vv} <- get
-  let bit7 = bitGet 8 av 
-      acc' = av `rotateR` 1
-      bit7' = bitGet 8 acc'  
+  s@CPU{acc = av, v = vv} <- get  
   case mode of
-    Accumulator -> do put $ s {acc = acc'
-                              ,c = bit7
-                              ,v = (if bit7' == 1 then 1 else vv)}
-                      return ()
-    _           -> do
-      val <- readCPUmemory8 addr
-      put $ s {memory = writeByte (memory s) addr val
+    Accumulator -> do
+      let bit7 = bitGet 8 av 
+          av' = av `rotateR` 1
+          bit7' = bitGet 8 av'
+      put $ s {acc = av'
               ,c = bit7
               ,v = (if bit7' == 1 then 1 else vv)}
-      return ()
+      return Nothing
+    _           -> do
+      val <- readCPUmemory8 addr
+      let bit7 = bitGet 8 val 
+          val' = val `rotateR` 1
+          bit7' = bitGet 8 val'
+      put s {c = bit7
+            ,v = (if bit7' == 1 then 1 else vv)}
+      writeByte addr val'
 
-rra :: Address -> State CPU ()
+rra :: Address -> State CPU IOevent
 rra addr = do
-  ror (Accumulator) addr
+  ror (Immediate) addr
   adc addr
 
-rti :: State CPU ()
+rti :: State CPU IOevent
 rti = do  
   rts
   plp
 
-rts :: State CPU ()
+rts :: State CPU IOevent
 rts = do
   s@CPU{sp = spv, memory = mem} <- get
   let val = evalState (readCPUmemory16 (toWord16 (spv - 2))) s
   put s {memory = writeAddr mem (toWord16 spv) 0}
   jmp val
 
-sbc :: Address -> State CPU ()
+sbc :: Address -> State CPU IOevent
 sbc addr = do
   s@CPU{acc = a} <- get 
   val <- readCPUmemory8 addr
   let (a',s') = runState (arithmetic ((-)a) val) s
   put $ s' {acc = a', c = if bitGet 7 a /= bitGet 7 a' then 0 else c s'  }
-  return ()
+  return Nothing
 
-sed :: State CPU ()
+sed :: State CPU IOevent
 sed = do
   s <- get
   put $ s {d = 1}
-  return ()
+  return Nothing
 
-sei :: State CPU ()
+sei :: State CPU IOevent
 sei = do
   s <- get
   put $ s {i = 1}
-  return ()
+  return Nothing
 
-sta :: Address -> State CPU ()
+sta :: Address -> State CPU IOevent
 sta addr = do
   s@CPU{memory = mem,acc = a} <- get
-  put $ s{memory = writeByte mem addr a}
-  return ()
+  writeByte addr a
 
-stx :: Address -> State CPU ()
+stx :: Address -> State CPU IOevent
 stx addr = do
   s@CPU{memory = mem, x = xv} <- get
-  put $ s{memory = writeByte mem addr xv}
-  return ()
-
-sty :: Address -> State CPU ()
+  writeByte addr xv
+  
+sty :: Address -> State CPU IOevent
 sty addr = do
   s@CPU{memory = mem, y = yv} <- get
-  put s{memory = writeByte mem addr yv}
-  return ()  
+  writeByte addr yv
 
-tax :: State CPU ()
+tax :: State CPU IOevent
 tax = do
   s@CPU{acc = a, x = xv} <- get
   let s' = execState (arithmetic (\_ -> a) xv) s
   put s' {x = a}
-  return ()
+  return Nothing
 
-tay :: State CPU ()
+tay :: State CPU IOevent
 tay = do
   s@CPU{acc = a,y = yv} <- get
   let s' = execState (arithmetic (\_ -> a) yv) s
   put $ s' {y = a}
-  return ()
+  return Nothing
 
-tsx :: State CPU ()
+tsx :: State CPU IOevent
 tsx = do
   s@CPU{sp = spv, x = xv} <- get
   let s' = execState (arithmetic (\_ -> spv) xv) s
   put s'{x = spv}
-  return ()
+  return Nothing
 
-txa :: State CPU ()
+txa :: State CPU IOevent
 txa = do
   s@CPU{acc = a, x = xv} <- get
   let s' = execState (arithmetic (\_ -> xv) a) s
   put $ s {acc = xv}
-  return ()
+  return Nothing
 
-txs :: State CPU ()
+txs :: State CPU IOevent
 txs = do
   s@CPU{x = xv,sp = spv} <- get
   let s' = execState (arithmetic (\_ -> xv) spv ) s
   put $ s {sp = xv}
-  return ()
+  return Nothing
 
-tya :: State CPU ()
+tya :: State CPU IOevent
 tya = do
   s@CPU{acc = a, y = yv} <- get
   let s' = execState (arithmetic (\_ -> yv) a) s
   put $ s {acc = yv}
-  return ()
+  return Nothing
 
 
 --auxilliary functions
 
-byteToFlags :: State CPU () 
+byteToFlags :: State CPU IOevent 
 byteToFlags = do
   s@CPU{sp = spv} <- get
   bt <- readCPUmemory8 (toWord16 spv)
@@ -454,58 +461,60 @@ byteToFlags = do
         ,v = bitGet 6 bt 
         ,n = bitGet 7 bt
         ,memory = writeAddr (memory s) (toWord16 spv) 0} 
-                                   
+  return Nothing                                 
 
-push :: Byte -> State CPU ()
+push :: Byte -> State CPU IOevent
 push val = do
   s@CPU{memory = mem, sp = spv} <- get
-  put $ s {memory = writeByte mem ((toWord16 spv) + 0x0100) val
-          ,sp = spv + 1}
-  return ()
+  put $ s {sp = spv + 1}
+  writeByte ((toWord16 spv) + 0x0100) val --rewrite other writes to memory that use let statements to be in this style
 
-pop :: State CPU ()
+pop :: State CPU IOevent
 pop = do
   a@CPU{sp = spv,memory = mem} <- get
   val <- readCPUmemory8 ((toWord16 spv) - 1 + 0x0100)
   put $ a {acc = val,
-           sp = spv - 1, memory = (writeByte mem (toWord16 spv -1 + 0x0100) 0)}
+           sp = spv - 1}
+  writeByte (toWord16 spv -1 + 0x0100) 0
 
-pushAddr :: Address -> State CPU ()
+pushAddr :: Address -> State CPU IOevent
 pushAddr addr = do s@CPU{memory = mem, sp = spv} <- get
                    put s {memory = writeAddr mem ((toWord16 spv) + 0x0100) addr
                          ,sp = spv +2}
-                   return ()
+                   return Nothing
 
-branch :: Bool -> Address -> State CPU ()
+branch :: Bool -> Address -> State CPU IOevent
 branch cond addr = do
   s@CPU{cyclesC = cycles',pc = pcv} <- get
   val <- (readCPUmemory8 addr)
   let cycles'' = if differentPages (pc s) addr then 2 else 1
   if cond
     then do put s {pc = (fromIntegral val) + pcv , cyclesC = cycles'' + cycles'}
-            return ()
+            return Nothing
     else do
     put s{cyclesC = cycles' + 2,pc = pcv + 2}
-    return () 
+    return Nothing
 
-compare' :: Byte -> Byte -> State CPU ()
+compare' :: Byte -> Byte -> State CPU IOevent
 compare' v1 v2 = do
   s <- get
   if v1 > v2
     then do put s {c = 1}
-            return ()
+            return Nothing
     else
     if v1 == v2
     then do put s {c = 1, z = 1}
-            return ()
+            return Nothing
     else do
       put s {n = 1}
-      return ()
+      return Nothing
 
-arithmetic :: (Byte -> Byte) -> Word8 -> State CPU Byte --memory arithmetic
+--takes a function and a byte and runs tests to change flags. Returns result of f
+--especially useful for things which alter the acc
+arithmetic :: (Byte -> Byte) -> Byte -> State CPU Byte
 arithmetic f val = do
   let val' = f val
-  s <- get     
+  s <- get
   if val' == 0
     then do put $ s {z = 1}
             return val'
@@ -514,16 +523,26 @@ arithmetic f val = do
                  return val'
          else return val'
 
+--note that the arithmetical aux functions do not write the values they operate upon, the operation itself must do that.
 augment :: Word8 -> State CPU Word8
 augment val = arithmetic (+1) val
 
-decrement :: Word8 -> State CPU Byte 
+decrement :: Word8 -> State CPU Byte
 decrement val = do
   arithmetic (val-) 1 --subtraction isn't associative dingus
   
-writeByte :: Memory -> Address -> Byte -> Memory
-writeByte mem addr val = V.modify (\vec -> MV.write vec (fromIntegral addr) val) mem
-
+writeByte :: Address -> Byte -> State CPU IOevent
+writeByte addr val =
+  do s@CPU{memory=mem} <- get
+     if addr == ioOut
+       then
+       do let mem' = V.modify (\vec -> MV.write vec (fromIntegral addr) val) mem
+          put s {memory=mem'}
+          return $ Just (putChar (toChar val))       
+       else
+       do let mem' = V.modify (\vec -> MV.write vec (fromIntegral addr) val) mem
+          put s {memory=mem'}
+          return Nothing
 writeAddr :: Memory -> Address -> Address -> Memory
 writeAddr memory target val =
   runST $ do
@@ -585,12 +604,12 @@ addressForMode s@CPU {memory = mem, pc = pcv, x = xr, y = yr} mode =
   where immAddr = evalState (readCPUmemory16 (pcv+1)) s
         immByte = evalState (readCPUmemory8  (pcv+1)) s
 
-step :: State CPU (Opcode,Address,Byte)
+step :: State CPU (Opcode,Address,Byte,IOevent)
 step = do
   s@CPU{memory = mem, pc = pcv} <- get
   byte <- readCPUmemory8 pcv
   let opcode@Opcode {CPU.Opcode.cycle = cycles,len = length, pageCrossCycles = extraCycles,mnem = mnemonic} = decodeOpcode byte
-      op = runInstruction opcode
+      op = getInstruction opcode
       (diff,address) = addressForMode s (mode opcode)
   byte' <- readCPUmemory8 (pcv + 1)
   let increasePc =
@@ -600,13 +619,13 @@ step = do
                                   + (fromIntegral cycles)
                                   + (fromIntegral extraCycles),
                          pc = (fromIntegral $ pc s') + (fromIntegral length)}
-                return (opcode,address,byte')
+                return (opcode,address,byte',Nothing)
         else do let s' = execState (op address) s
                 put s' {cyclesC = fromIntegral (fromIntegral $ cyclesC s')
                                   + (fromIntegral cycles),
                          pc = (fromIntegral $ pc s')
                               + (fromIntegral length)}
-                return (opcode,address,byte')
+                return (opcode,address,byte',Nothing)
       samePc =
         if diff --done if not a jump or branch
         then do let s' = execState (op address) s
@@ -615,11 +634,26 @@ step = do
                                   + (fromIntegral extraCycles),
                          pc = (fromIntegral $ pc s')
                               + (fromIntegral length)}
-                return (opcode,address,byte')
+                return (opcode,address,byte',Nothing)
         else do let s' = execState (op address) s
                 put s' {cyclesC = (cyclesC s')
                                   + (fromIntegral cycles)}
-                return (opcode,address,byte') 
+                return (opcode,address,byte',Nothing)
+      samePcIO :: State CPU (Opcode,Address,Byte,IOevent) 
+      samePcIO =
+        if diff --done if not a jump or branch
+        then do let (ioA,s') = runState (op address) s
+                put s' {cyclesC = (fromIntegral $ cyclesC s')
+                                  + (fromIntegral cycles)
+                                  + (fromIntegral extraCycles),
+                         pc = (fromIntegral $ pc s') + (fromIntegral length)}
+                return (opcode,address,byte',ioA)
+        else do let (ioA,s') = runState (op address) s
+                put s' {cyclesC = fromIntegral (fromIntegral $ cyclesC s')
+                                  + (fromIntegral cycles),
+                         pc = (fromIntegral $ pc s')
+                              + (fromIntegral length)}
+                return (opcode,address,byte',ioA)
   case mnemonic of
     BNE -> samePc 
     BEQ -> samePc
@@ -632,10 +666,9 @@ step = do
     JSR -> samePc
     RTS -> samePc
     _   -> increasePc
-     
 
-runInstruction :: Opcode -> (Address -> State CPU ())
-runInstruction (Opcode _ mnemonic mode _ _ _) = case mnemonic of
+getInstruction :: Opcode -> (Address -> State CPU IOevent)
+getInstruction (Opcode _ mnemonic mode _ _ _) = case mnemonic of
   ADC -> adc
   AND -> CPU.and
   ASL -> asl mode
@@ -696,13 +729,13 @@ runInstruction (Opcode _ mnemonic mode _ _ _) = case mnemonic of
   TYA -> const tya
   _   -> const nop
   
+--Constants
+ioRange :: (Address,Address)
+ioRange = (0x800,0x0900)
+
+ioOut = 0x1000
   
   
-  
-  
-  
-  
-  
-  
+-- test  
   
   

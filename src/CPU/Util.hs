@@ -10,7 +10,8 @@ module CPU.Util (
   , sliceBS
   , catMaybesV
   , bitGet
-) where
+  , toChar
+  ) where
 
 --Code adapted from HNES
 
@@ -21,6 +22,7 @@ import           Data.Maybe      (fromJust, isJust)
 import           Data.Vector     as V
 import           Data.Word       (Word16, Word8)
 import           Text.Printf     (printf)
+import Data.Char (chr)
 
 prettifyWord16 :: Word16 -> String
 prettifyWord16 = printf "%04X"
@@ -39,6 +41,9 @@ toWord16 = fromIntegral
 
 toInt :: Word8 -> Int
 toInt = fromIntegral
+
+toChar :: Word8 -> Char
+toChar = chr . fromIntegral 
 
 splitW16 :: Word16 -> (Word8, Word8)
 splitW16 w = (fromIntegral (w .&. 0xFF), fromIntegral (w `shiftR` 8))

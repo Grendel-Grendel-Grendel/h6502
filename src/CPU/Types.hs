@@ -44,6 +44,7 @@ initCPU =
 type Byte = Word8
 type Address = Word16
 type Memory = V.Vector Word8
+type IOevent = (Maybe (IO ()))
 
 toBool :: (Num a, Eq a) => a -> Bool
 toBool 1 = True
