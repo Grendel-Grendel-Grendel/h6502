@@ -1,2 +1,2 @@
-# nes-emulator
-An emulator of the 6502. Runs both legal and illegal opcodes.
+# 6502 Emulator
+An emulator of the MOS 6502. Runs both legal and illegal opcodes.
